@@ -1,0 +1,377 @@
+# Hello, for some quick context on the project (why I have a 2.5 year-old project in my portfolio)
+# This was my most comprehensive project that was a culmination of 3 quarters/1 year of taking R-adjacent classes
+# All of the methods used were directly related to structures learned in linear algebra and statistical modeling +machine learning
+# This was a collaborative project, but I built all of the code with [Classmate 1] so treat it as everything I can do
+
+---
+title: "Spotify Success - Standardized"
+author: "[Classmate 1], [Classmate 2], Carson"
+date: "2023-12-05"
+output: html_document
+---
+
+---
+title: "INDE 427 - Spotify Project"
+author: "[Classmate 1], [Classmate 2], Carson"
+date: "2023-12-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+#knitr::opts_chunk$set(echo = TRUE)
+rm(list = ls()) #clears global environment
+```
+
+```{r}
+## Setting up the data
+# The first step is initializing the data. Compared to the downloaded data set from kaggle, we need to address the missing data. For the key variable, we used https://musicstax.com/track/what-was-i-made-for-from-the-motion-picture-barbie/6wf7Yu7cxBSPrRlWeSeK0Q to fill in the missing keys. For the in_shazam_charts variable--we just dropped it (for now).
+#Spotify = read.csv("Spotify Success.csv") #initial data set
+spotify = read.csv("spotify-2023.csv")
+for (i in 1:nrow(spotify)) {
+  if(spotify[i, 5] < 1950) {
+    spotify[i, 5] = "pre 1950s"
+  } else if (1950 <= spotify[i, 5] &&  spotify[i, 5] < 1970) {
+    spotify[i, 5] = "1950-1960s"
+  } else if (1970 <= spotify[i, 5] && spotify[i, 5] < 1990) {
+    spotify[i, 5] = "1970-1980s"
+  } else if (1990 <= spotify[i, 5] && spotify[i, 5] < 2010) {
+    spotify[i, 5] = "1990s-2000s"
+  } else {
+    spotify[i, 5] = "post 2010s"
+  }
+}
+for (i in 1:6) {
+  spotify[,i] = as.factor(spotify[,i])
+} 
+for (i in 7:ncol(spotify)) {
+  spotify[,i] = as.numeric(spotify[,i])
+}
+spotify = cbind(spotify[1:6],sapply(spotify[,7:ncol(spotify)], function(x) ifelse(is.na(x), mean(x, na.rm =TRUE), x)))
+# spotify = cbind(spotify[1:4],sapply(spotify[,5:ncol(spotify)], function(x) ifelse(is.na(x), median(x, na.rm =TRUE), x)))
+
+x = spotify[,3:(ncol(spotify)-1)] # excluding song name and artist from data
+y = spotify[,ncol(spotify)]
+y = scale(y)
+df_spotify = data.frame(x,y)
+names(df_spotify)[ncol(df_spotify)] = c("streams")
+
+## Plotting Points
+for (i in 1:ncol(x)) {
+  plot(x[,i], y, xlab = names(x)[i], ylab = "streams")
+}
+```
+```{r}
+## Setting up Cross Validation
+# Base Data
+train = sample(nrow(spotify),floor( nrow(spotify) * 7/10) )
+spotify_train = df_spotify[train,]
+spotify_test = df_spotify[-train,] #
+n_folds = 10
+N = dim(spotify_test)[1] # sample size
+folds_i = sample(rep(1:n_folds, length.out = N))
+cv_mse = NULL
+```
+
+``` {r}
+## Principal Component Analysis - Analyzing Dimensions of Data
+require(FactoMineR)
+perform_pca = PCA(x[,7:ncol(x)], graph = FALSE, ncp = 10)
+require(factoextra )
+fviz_screeplot(perform_pca, addlabels = TRUE, ylim = c(0, 50))
+# fviz_contrib(spotify_pca, choice = "var", axes = 1, top = 20)
+# fviz_contrib(spotify_pca, choice = "var", axes = 2, top = 20)
+x_pca = cbind(x[1:6],perform_pca$ind$coord)
+spotify_pca = data.frame(x_pca, y)
+names(spotify_pca)[7:ncol(spotify_pca)] =   c("PC1","PC2","PC3","PC4","PC5","PC6","PC7","PC8","PC9","PC10", "streams")
+# PCA Data
+spotify_trainPCA = spotify_pca[train,]
+spotify_testPCA = spotify_pca[-train,]
+# PCA Cross Validation
+perform_pcaCV = PCA(spotify_train[,7:(ncol(x)-1)], graph = FALSE, ncp = 10)
+fviz_screeplot(perform_pcaCV, addlabels = TRUE, ylim = c(0, 50)) # Training data leads to similar, yet notably different PCA axis. Analysis was not done on this PCA, but instead the PCA from the full data
+# fviz_contrib(spotify_pca, choice = "var", axes = 1, top = 20)
+# fviz_contrib(spotify_pca, choice = "var", axes = 2, top = 20)
+# x_pcaCV = cbind(x[1:6],perform_pcaCV$ind$coord)
+# spotify_pca = data.frame(x_pca, y)
+# names(spotify_pca)[7:ncol(spotify_pca)] =   c("PC1","PC2","PC3","PC4","PC5","PC6","PC7","PC8","PC9","PC10", "streams")
+```
+
+
+
+
+``` {r}
+## LASSO
+x_LASSO = cbind(x[1],x[4:5], x[7:8], x[10:ncol(x)])
+require(glmnet)
+# Conducted LASSO on full data because it was very fincky on what inputs it would accept: may or may not be more correct to conduct on crossvalidation. It would be good practice to do it on training data
+fit = glmnet(x, y, family=c("gaussian"))
+# Analyze Beta of fit. Variables that appear in earlier columns are more important
+# Analyzing Beta you find: in_apple_playlist, in_spotify_playlist, in_spotify_charts, artist_count, energy_., released_year | are the important variable (cutoff of top 6)
+# fit$beta[,2]
+# fit$beta[,25]
+# fit$beta[,27]
+# fit$beta[,29]
+plot(fit,label = TRUE) # Can remove variables to make picture better
+fit_modified = glmnet(x_LASSO,y, family=c("gaussian")) # A LASSO graph w/o x2, x3, x6 and x9 (variables with troublesomely large values that make it hard to view plot)
+plot(fit_modified, label = TRUE)
+
+# LASSO Regression
+require("ggfortify")
+cv_mse <- NULL
+for (k in 1:n_folds) {
+  test_i = which(folds_i == k)
+  spotify_trainCV <- spotify_train[-test_i, ]
+  spotify_testCV <- spotify_train[test_i, ]
+  modelLASSO <- lm(streams ~ in_apple_playlists+ in_spotify_playlists+ in_spotify_charts+ artist_count+ energy_.+ released_year, data  = spotify_trainCV)
+  y_hat <- predict(modelLASSO, spotify_testCV)
+  true_y <- spotify_testCV$streams
+  cv_mse[k] <- mean((true_y - y_hat)^2)
+}
+mean(cv_mse)
+#summary(modelLASSO)
+autoplot(modelLASSO, which = 1:6, ncol = 3, label.size = 3)
+```
+
+
+```{r}
+## Linear Regression
+#require("ggfortify")
+# linearSpotify = lm(streams ~ ., data = spotify_train)
+# summary(linearSpotify)
+# y_hat = predict(linearSpotify, spotify_test)
+# true_y = spotify_test$streams
+# cv_mse = mean((true_y - y_hat)^2)
+cv_mse <- NULL
+for (k in 1:n_folds) {
+  test_i = which(folds_i == k)
+  spotify_trainCV <- spotify_train[-test_i, ]
+  spotify_testCV <- spotify_train[test_i, ]
+  model1 <- lm(streams ~., data  = spotify_trainCV)
+  y_hat <- predict(model1, spotify_testCV)
+  true_y <- spotify_testCV$streams
+  cv_mse[k] <- mean((true_y - y_hat)^2)
+}
+mean(cv_mse)
+# summary(model1)
+autoplot(model1, which = 1:6, ncol = 3, label.size = 3)
+
+#spotify_lmReduced <- step(model1, direction="backward", test="F")
+cv_mse <- NULL
+#model1_reduced = streams ~ released_day + in_apple_charts + in_deezer_charts + artist_count + energy_. + in_spotify_charts + released_year + in_apple_playlists + in_spotify_playlists
+for (k in 1:n_folds) {
+  test_i = which(folds_i == k)
+  spotify_trainCV <- spotify_train[-test_i, ]
+  spotify_testCV <- spotify_train[test_i, ]
+  model1_reduced <- lm(streams ~released_day + in_apple_charts + in_deezer_charts + artist_count + energy_. + in_spotify_charts + released_year + in_apple_playlists + in_spotify_playlists, data  = spotify_trainCV)
+  y_hat <- predict(model1_reduced, spotify_testCV)
+  true_y <- spotify_testCV$streams
+  cv_mse[k] <- mean((true_y - y_hat)^2)
+}
+mean(cv_mse)
+# summary(model1_reduced)
+autoplot(model1_reduced, which = 1:6, ncol = 3, label.size = 3)
+#anova(model1_reduced,model1)
+
+# # Regression on PCA
+# lmSpotifyPCA = lm(streams~., data = spotify_trainPCA)
+# #summary(lmSpotifyPCA)
+# y_hpca = predict(lmSpotifyPCA, spotify_testPCA)
+# true_ypca = spotify_testPCA$streams
+# cv_msePCA = mean((true_ypca - y_hpca)^2)
+
+cv_mse <- NULL
+for (k in 1:n_folds) {
+  test_i = which(folds_i == k)
+  spotify_trainCVPCA <- spotify_trainPCA[-test_i, ]
+  spotify_testCVPCA <- spotify_trainPCA[test_i, ]
+  model1_PCA <- lm(streams ~., data  = spotify_trainCVPCA)
+  y_hat <- predict(model1_PCA, spotify_testCVPCA)
+  true_y <- spotify_testCVPCA$streams
+  cv_mse[k] <- mean((true_y - y_hat)^2)
+}
+mean(cv_mse)
+# summary(model1_PCA)
+autoplot(model1_PCA, which = 1:6, ncol = 3, label.size = 3)
+
+#model1_PCA_reduced = step(model1_PCA, direction="backward", test="F")
+#model1_PCA_reduced = streams ~ PC9 + mode + PC5 + artist_count + released_year + PC8 + PC2 + PC4 + PC3 + PC1
+cv_mse <- NULL
+for (k in 1:n_folds) {
+  test_i = which(folds_i == k)
+  spotify_trainCVPCA <- spotify_trainPCA[-test_i, ]
+  spotify_testCVPCA <- spotify_trainPCA[test_i, ]
+  model1_PCA_reduced <- lm(streams ~PC9 + mode + PC5 + artist_count + released_year + PC8 + PC2 + PC4 + PC3 + PC1, data  = spotify_trainCVPCA)
+  y_hat <- predict(model1_PCA_reduced, spotify_testCVPCA)
+  true_y <- spotify_testCVPCA$streams
+  cv_mse[k] <- mean((true_y - y_hat)^2)
+}
+mean(cv_mse)
+# summary(model1_PCA_reduced)
+autoplot(model1_PCA, which = 1:6, ncol = 3, label.size = 3)
+```
+
+```{r}
+## Random Forest
+require(randomForest)
+# Default RF with various ntree's, nodesize, and mtry's
+# ntree = 100, nodesize = 20, mtry = 5
+# cv_mse <- NULL
+# for (k in 1:n_folds) {
+#   test_i = which(folds_i == k)
+#   spotify_trainCV <- spotify_train[-test_i, ]
+#   spotify_testCV <- spotify_train[test_i, ]
+#   spotify_rf <- randomForest(streams ~ ., data = spotify_train, ntree = 100, nodesize = 20, mtry = 5)
+#   y_hat <- predict(spotify_rf, spotify_testCV)
+#   true_y <- spotify_testCV$streams
+#   cv_mse[k] <- mean((true_y - y_hat)^2)
+# }
+# mean(cv_mse)
+# summary(spotify_rf)
+
+# # ntree = 50, nodesize = 20, mtry = 5
+# cv_mse <- NULL
+# for (k in 1:n_folds) {
+#   test_i = which(folds_i == k)
+#   spotify_trainCV <- spotify_train[-test_i, ]
+#   spotify_testCV <- spotify_train[test_i, ]
+#   spotify_rf <- randomForest(streams ~ ., data = spotify_train, ntree = 50, nodesize = 20, mtry = 5)
+#   y_hat <- predict(spotify_rf, spotify_testCV)
+#   true_y <- spotify_testCV$streams
+#   cv_mse[k] <- mean((true_y - y_hat)^2)
+# }
+# mean(cv_mse)
+# summary(spotify_rf)
+# 
+# # ntree = 200, nodesize = 20, mtry = 5
+# cv_mse <- NULL
+# for (k in 1:n_folds) {
+#   test_i = which(folds_i == k)
+#   spotify_trainCV <- spotify_train[-test_i, ]
+#   spotify_testCV <- spotify_train[test_i, ]
+#   spotify_rf <- randomForest(streams ~ ., data = spotify_train, ntree = 200, nodesize = 20, mtry = 5)
+#   y_hat <- predict(spotify_rf, spotify_testCV)
+#   true_y <- spotify_testCV$streams
+#   cv_mse[k] <- mean((true_y - y_hat)^2)
+# }
+# mean(cv_mse)
+# summary(spotify_rf)
+# 
+# # ntree = 200, nodesize = 40, mtry = 5
+# cv_mse <- NULL
+# for (k in 1:n_folds) {
+#   test_i = which(folds_i == k)
+#   spotify_trainCV <- spotify_train[-test_i, ]
+#   spotify_testCV <- spotify_train[test_i, ]
+#   spotify_rf <- randomForest(streams ~ ., data = spotify_train, ntree = 200, nodesize = 40, mtry = 5)
+#   y_hat <- predict(spotify_rf, spotify_testCV)
+#   true_y <- spotify_testCV$streams
+#   cv_mse[k] <- mean((true_y - y_hat)^2)
+# }
+# mean(cv_mse)
+# summary(spotify_rf)
+# 
+# # ntree = 200, nodesize = 30, mtry = 5
+# cv_mse <- NULL
+# for (k in 1:n_folds) {
+#   test_i = which(folds_i == k)
+#   spotify_trainCV <- spotify_train[-test_i, ]
+#   spotify_testCV <- spotify_train[test_i, ]
+#   spotify_rf <- randomForest(streams ~ ., data = spotify_train, ntree = 200, nodesize = 30, mtry = 5)
+#   y_hat <- predict(spotify_rf, spotify_testCV)
+#   true_y <- spotify_testCV$streams
+#   cv_mse[k] <- mean((true_y - y_hat)^2)
+# }
+# mean(cv_mse)
+# summary(spotify_rf)
+
+# ntree = 200, nodesize = 20, mtry = 7
+cv_mse <- NULL
+for (k in 1:n_folds) {
+  test_i = which(folds_i == k)
+  spotify_trainCV <- spotify_train[-test_i, ]
+  spotify_testCV <- spotify_train[test_i, ]
+  spotify_rf <- randomForest(streams ~ ., data = spotify_train, ntree = 200, nodesize = 20, mtry = 7)
+  y_hat <- predict(spotify_rf, spotify_testCV)
+  true_y <- spotify_testCV$streams
+  cv_mse[k] <- mean((true_y - y_hat)^2)
+}
+mean(cv_mse)
+# summary(spotify_rf)
+# This seems to be the best parameters for a rf of model1 (all variables)
+
+# ntree = 200, nodesize = 20, mtry = 3
+# cv_mse <- NULL
+# for (k in 1:n_folds) {
+#   test_i = which(folds_i == k)
+#   spotify_trainCV <- spotify_train[-test_i, ]
+#   spotify_testCV <- spotify_train[test_i, ]
+#   spotify_rf <- randomForest(streams ~ ., data = spotify_train, ntree = 200, nodesize = 30, mtry = 3)
+#   y_hat <- predict(spotify_rf, spotify_testCV)
+#   true_y <- spotify_testCV$streams
+#   cv_mse[k] <- mean((true_y - y_hat)^2)
+# }
+# mean(cv_mse)
+# summary(spotify_rf)
+
+#Comparing to LASSO and LM_Reduced
+# LASSO
+
+# ntree = 200, nodesize = 20, mtry = 3
+# cv_mse <- NULL
+# for (k in 1:n_folds) {
+#   test_i = which(folds_i == k)
+#   spotify_trainCV <- spotify_train[-test_i, ]
+#   spotify_testCV <- spotify_train[test_i, ]
+#   spotify_rf <- randomForest(streams ~ in_apple_playlists+ in_spotify_playlists+ in_spotify_charts+ artist_count+ energy_.+ released_year, data = spotify_train, ntree = 200, nodesize = 20, mtry = 3)
+#   y_hat <- predict(spotify_rf, spotify_testCV)
+#   true_y <- spotify_testCV$streams
+#   cv_mse[k] <- mean((true_y - y_hat)^2)
+# }
+# mean(cv_mse)
+# summary(spotify_rf)
+
+# ntree = 200, nodesize = 20, mtry = 2
+cv_mse <- NULL
+for (k in 1:n_folds) {
+  test_i = which(folds_i == k)
+  spotify_trainCV <- spotify_train[-test_i, ]
+  spotify_testCV <- spotify_train[test_i, ]
+  spotify_rf <- randomForest(streams ~ in_apple_playlists+ in_spotify_playlists+ in_spotify_charts+ artist_count+ energy_.+ released_year, data = spotify_train, ntree = 50, nodesize = 20, mtry = 2)
+  y_hat <- predict(spotify_rf, spotify_testCV)
+  true_y <- spotify_testCV$streams
+  cv_mse[k] <- mean((true_y - y_hat)^2)
+}
+# summary(spotify_rf)
+mean(cv_mse)
+
+# LM_Reduced
+# ntree = 200, nodesize = 20, mtry = 2
+cv_mse <- NULL
+for (k in 1:n_folds) {
+  test_i = which(folds_i == k)
+  spotify_trainCV <- spotify_train[-test_i, ]
+  spotify_testCV <- spotify_train[test_i, ]
+  spotify_rf <- randomForest(streams ~ released_day + in_apple_charts + in_deezer_charts + artist_count + energy_. + in_spotify_charts + released_year + in_apple_playlists + in_spotify_playlists, data = spotify_train, ntree = 200, nodesize = 20, mtry = 2)
+  y_hat <- predict(spotify_rf, spotify_testCV)
+  true_y <- spotify_testCV$streams
+  cv_mse[k] <- mean((true_y - y_hat)^2)
+}
+# summary(spotify_rf)
+mean(cv_mse)
+
+# # ntree = 200, nodesize = 20, mtry = 3
+# cv_mse <- NULL
+# for (k in 1:n_folds) {
+#   test_i = which(folds_i == k)
+#   spotify_trainCV <- spotify_train[-test_i, ]
+#   spotify_testCV <- spotify_train[test_i, ]
+#   spotify_rf <- randomForest(streams ~ released_day + in_apple_charts + in_deezer_charts + artist_count + energy_. + in_spotify_charts + released_year + in_apple_playlists + in_spotify_playlists, data = spotify_train, ntree = 200, nodesize = 40, mtry = 3)
+#   y_hat <- predict(spotify_rf, spotify_testCV)
+#   true_y <- spotify_testCV$streams
+#   cv_mse[k] <- mean((true_y - y_hat)^2)
+# }
+# # summary(spotify_rf)
+# mean(cv_mse)
+
+# Conclude that base RF is the best, but LASSO performs decently close whereas the step reduced model is by far the worst.
+```
